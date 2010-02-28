@@ -52,13 +52,38 @@ sub _wanted {
         return;
     };
     return if S_ISDIR($st->mode);
+    my $dbh = $self->connect();
     my ($Path,$Name) = map($dbh->quote($_),($File::Find::dir, $fn));
     my $Size = $st->size;
     my $CreateTime = $st->ctime;
     my $ModTime = $st->mtime;
     my $ID = unpack('L', sha1($File::Find::name));
-    my $dbh = $self->connect();
     $dbh->do(qq|INSERT INTO File (ID, Path, Name, Size, CreateTime, ModTime) VALUES ($ID, $Path, $Name, $Size, $CreateTime, $ModTime)|);
+}
+
+
+sub duplicates_of {
+    my ($self, $path) = @_
+        or croak 'Usage: $duplo->duplicates_of($path_to_file)';
+    my $dbh = $self->connect();
+    $path = $dbh->quote($path);
+    my $stm = $dbh->prepare(qq{
+        SELECT F2.*
+        FROM File F1
+        JOIN File F2 ON 
+            F2.Name=F1.Name
+            AND F2.Size=F1.Size
+            AND F2.ID != F1.ID 
+        WHERE F1.Name = $path
+        ORDER BY F2.Path
+        });
+    $stm->execute();
+    my @dups = ();
+    while (my $row = $stm->fetchrow_hashref()) {
+        push @dups, $row;
+    }
+    $stm->finish();
+    return \@dups;
 }
 
 sub duplicates {
@@ -91,12 +116,13 @@ sub checksum {
     my $duplicates = shift
         or do { carp("checksum() called without args"); return; };
     my $dbh = $self->connect();
+    $self->verbmsg("Creating checksums");
     for my $fn (sort keys %$duplicates) {
         for my $f (sort { $a->{Path} cmp $b->{Path} } @{$duplicates->{$fn}}) {
             next if $f->{Checksum};
             my $fullname = catfile($f->{Path}, $f->{Name});
             my ($sum,undef) = split /\s+/, qx{ md5sum -b "$fullname" };
-            $verbose && print "$fullname $sum\n";
+            $self->verbmsg("$fullname $sum");
             $dbh->do(qq| UPDATE File SET Checksum = '$sum' WHERE ID = $f->{'ID'} |);
         }
         $dbh->commit();
@@ -164,8 +190,9 @@ sub connect {
         or croak;
     return $self->{dbh} if $self->{dbh};
     my $dbname = $self->{dbfile};
+    $self->verbmsg("Connecting to $dbname");
     my $dbh = DBI->connect("dbi:SQLite:dbname=$dbname","","",
-        { AutoCommit => 0, PrintError => 1}
+        { AutoCommit => 0, PrintError => 1});
     $self->{dbh} = $dbh;
     return $dbh;
 }
@@ -201,3 +228,8 @@ sub verbmsg {
     $self->{VERBOSE} && print STDERR @_;
     $self->{VERBOSE} && print "\n";
 }
+
+
+
+
+1;
