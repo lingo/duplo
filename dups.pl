@@ -140,10 +140,11 @@ sub plan {
         push @{$files{$row->[0]}}, $row->[1];
     }
     for my $fn (sort keys %files) {
+        print "## $fn\n";
         for my $d (sort @{$files{$fn}}) {
-            print "# $fn\n";
-            print qq{ rm "$d" \n };
+            print qq{rm "$d" \n};
         }
+        print "#\n";
     }
     $stm->finish();
 }
