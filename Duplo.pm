@@ -62,6 +62,31 @@ sub _wanted {
 }
 
 
+sub duplicates_in {
+    my ($self, $path) = @_
+        or croak 'Usage: $duplo->duplicates_in($path_to_dir)';
+    my $dbh = $self->connect();
+    $path = $dbh->quote($path);
+    my $stm = $dbh->prepare(qq{
+        SELECT F2.*
+        FROM File F1
+        JOIN File F2 ON 
+            F2.Name=F1.Name
+            AND F2.Size=F1.Size
+            AND F2.ID != F1.ID
+            AND F2.Checksum = F1.Checksum
+        WHERE F1.Path = $path
+        ORDER BY F2.Path
+        });
+    $stm->execute();
+    my @dups = ();
+    while (my $row = $stm->fetchrow_hashref()) {
+        push @dups, $row;
+    }
+    $stm->finish();
+    return \@dups;
+}
+
 sub duplicates_of {
     my ($self, $path) = @_
         or croak 'Usage: $duplo->duplicates_of($path_to_file)';
@@ -164,6 +189,30 @@ sub plan {
     $stm->finish();
 }
 
+
+sub get_dirs {
+    my $self = shift
+        or croak 'Usage: $duplo->plan()';
+    my $dbh = $self->connect();
+    my $stm = $dbh->prepare(q{
+        SELECT
+        DISTINCT F1.Path
+        FROM File F1
+        JOIN File F2
+            ON F2.Checksum = F1.Checksum
+            AND F2.Name=F1.Name
+            AND F2.ID != F1.ID
+        ORDER BY F1.Path,F2.Path
+        });
+    $stm->execute();
+    my @paths;
+    while(my $row = $stm->fetchrow_arrayref) {
+        push @paths, $row->[0];
+    }
+    $stm->finish();
+    return \@paths;
+}
+
 sub print_dups {
     my $dups = shift
         or do { carp("print_dups() called without args"); return; };
@@ -228,8 +277,5 @@ sub verbmsg {
     $self->{VERBOSE} && print STDERR @_;
     $self->{VERBOSE} && print "\n";
 }
-
-
-
 
 1;

@@ -44,10 +44,16 @@ sub _init {
     $self->{_gui} = Gtk2::GladeXML->new($src);
     $self->{_gui}->signal_autoconnect_from_package($self);
     $self->{statusctx} = $self->_w('statusbar')->get_context_id("DuploUI");
+
+    my $tree = $self->_w('treeFolders');
+    $tree->set_model(Gtk2::ListStore->new(qw[ Glib::String ]));
+    tv_addcolumn($tree, 'Path', 'string');
+
     $self->{menu} = $self->initMenu();
 
     $self->{duplo} = Duplo->new('ext3photo.db');
-    $self->updateTree();
+    $self->updateFoldersTree();
+    $self->updateDupsTree();
     return $self;
 }
 
@@ -72,14 +78,14 @@ sub on_appWindow_delete_event {
 
 sub on_btnNewScan_clicked {
     my $self = shift;
-    $self->updateTree();
+    $self->updateDupsTree();
 }
 
 sub on_btnOpenDB_clicked {
     my $self = shift;
     my $dbfile = $self->choose_file('Choose DB File');
     $self->{duplo} = Duplo->new($dbfile);
-    $self->updateTree();
+    $self->updateDupsTree();
 } 
 
 sub on_treeview_row_activated {
@@ -171,6 +177,16 @@ sub on_menuHardlink_activate {
     }
 }
 
+sub on_treeFolders_row_activated {
+    my ($self, $tree, $path, $col) = @_;
+    my $model = $tree->get_model();
+    my $iter = $model->get_iter($path);
+    my $value = $model->get($iter, 0);
+    print Dumper(\$value);
+    return unless $value;
+    $self->updateDupsTree($value);
+}
+
 #==-{ General utility methods }-================================================#
 
 sub busy {
@@ -233,8 +249,20 @@ sub initTree {
 }
 
 
-sub updateTree {
+sub updateFoldersTree {
     my ($self) = @_
+        or croak;
+    my $tree = $self->_w('treeFolders');
+    my $store = $tree->get_model();
+    $store->clear();
+    my $dirs = $self->{duplo}->get_dirs();
+    for my $dir (@$dirs) {
+        $store->insert_with_values(-1, 0 => $dir);
+    }
+}
+
+sub updateDupsTree {
+    my ($self, $path) = @_
         or croak;
     unless($self->{duplo}) {
         $self->alert("Please first open a DB file");
@@ -244,10 +272,19 @@ sub updateTree {
     my $store = $tree->get_model();
     unless($store) { $self->initTree($tree); }
     $store = $tree->get_model();
+    $store->clear();
 
-    my $duplicates = $self->{duplo}->duplicates();
-    for my $fn (sort keys %$duplicates) {
-        $store->insert_with_values(-1, 0 => $fn);
+    my $duplicates;
+    if ($path) {
+        $duplicates = $self->{duplo}->duplicates_in($path);
+        for my $fn (sort @$duplicates) {
+            $store->insert_with_values(-1, 0 => $fn->{Name});
+        }
+    } else {
+        $duplicates = $self->{duplo}->duplicates();
+        for my $fn (sort keys %$duplicates) {
+            $store->insert_with_values(-1, 0 => $fn);
+        }
     }
 }
 
@@ -294,6 +331,44 @@ sub alert {
     $dialog->destroy();
     return $retval;
 }
+
+# Add a column to a treeview
+#   TreeView    $tree
+#   string      $name
+#   string      $type (string|int|boolean or one of the Gtk types)
+#   hash        %attr
+#                   cell_data_func  function to render cell if type is custom
+#                   cell_data       passed to above function
+#                   ...
+#                   other attr are passed to Gtk2::TreeViewColumn->set();
+sub tv_addcolumn {
+    my ($tree, $name, $type, %attr) = @_;
+    my @cols = $tree->get_columns();
+    my $colID = $attr{colID} || @cols;
+    delete $attr{colID};
+
+    if ($type =~ /string|int|boolean/) {
+        $type =~ s/([a-z])(.*)/Glib::\u$1$2/;
+    } elsif ($type !~ /^Glib::/) {
+        $type = 'Glib::Scalar';
+    }
+
+    my %render_attr = ( text => $colID );
+    my $renderer = Gtk2::CellRendererText->new()
+        or return -1;
+    my $column = Gtk2::TreeViewColumn->new_with_attributes($name, $renderer, %render_attr);
+
+    if ($type eq 'Glib::Scalar') {
+        $column->set_cell_data_func($renderer, $attr{cell_data_func}, $attr{cell_data});
+        delete $attr{cell_data_func};
+        delete $attr{cell_data};
+    }
+    $column->set($_, $attr{$_}) for keys %attr;
+    $column->set_sort_column_id($colID);
+    $tree->append_column($column);
+    return ($column, $colID);
+}
+
 
 
 1;
