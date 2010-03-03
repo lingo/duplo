@@ -246,6 +246,16 @@ sub connect {
     return $dbh;
 }
 
+sub remove {
+    my ($self, $path) = @_
+        or croak "remove() without args?";
+    my $dbh = $self->connect();
+    $path = $dbh->quote($path);
+    $dbh->do(qq{
+        DELETE FROM File WHERE (Path||'/'||Name) = $path
+        });
+}
+
 sub initdb {
     my ($self) = @_
         or croak;

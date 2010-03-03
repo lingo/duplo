@@ -39,10 +39,12 @@ sub _init {
     my $src = shift
         or die "Failed to load glade file, pass to new()\n";
 
+    $self->loadPrefs();
+
     Gnome2::Program->init ('Duplo', '1.0');
 
-    $self->{_gui} = Gtk2::GladeXML->new($src);
-    $self->{_gui}->signal_autoconnect_from_package($self);
+    $self->{gui} = Gtk2::GladeXML->new($src);
+    $self->{gui}->signal_autoconnect_from_package($self);
     $self->{statusctx} = $self->_w('statusbar')->get_context_id("DuploUI");
 
     my $tree = $self->_w('treeFolders');
@@ -58,10 +60,31 @@ sub _init {
 }
 
 
+sub loadPrefs() {
+    my ($self) = @_
+        or croak "loadPrefs is an instance method";
+    my $fn;
+    for my $f (qw{ ./duplo.rc ~/duplo.rc }) {
+        if ( -f $f ) {
+            $fn = $f;
+            last;
+        }
+    }
+    open F, '<', $fn
+        or croak "$!";
+    while (<F>) {
+        next if /^#/;
+        if (/(\w+)\s*[:=]\s*(.+)/) {
+            $self->{"_$1"} = $2;
+        }
+    }
+    close F;
+}
+
 sub _w {
     my ($self, $name) = @_
         or croak;
-    return $self->{_gui}->get_widget($name);
+    return $self->{gui}->get_widget($name);
 }
 
 sub mainWindow {
@@ -88,6 +111,28 @@ sub on_btnOpenDB_clicked {
     $self->updateDupsTree();
 } 
 
+sub iv_add_file {
+    my ($icon, $file) = @_
+        or croak;
+    my $model = $icon->get_model();
+    our $unknown_image ||= Gtk2::Stock->lookup('gtk-missing-image');
+
+    my ($pix,$size,$text);
+    $pix = undef;
+    if ($file->{Name} =~ /\.(jpg|gif|png|bmp|ico)$/i) {
+        my $fullpath = catfile($file->{Path}, $file->{Name});
+        if ( -r $fullpath ) {
+            $pix = Gtk2::Gdk::Pixbuf->new_from_file_at_scale($fullpath, 256, 256, 1);
+        }
+    }
+    $pix ||= $unknown_image;
+    $size = format_bytes($file->{Size});
+    my ($name, $path) = ($file->{Name}, $file->{Path}, $size);
+    ($name, $path, $size) = map Glib::Markup::escape_text($_),($name, $path, $size);
+    $text = qq( <b>$name</b>\n$path\n$size );
+    return $model->insert_with_values(-1, 0 => $text, 1 => $pix, 2 => catfile($file->{Path}, $file->{Name}));
+}
+
 sub on_treeview_row_activated {
     my $self = shift;
     my ($tree, $path, $col) = @_;
@@ -104,7 +149,6 @@ sub on_treeview_row_activated {
     my $icon = $self->_w('iconview1');
     my $store = $icon->get_model();
     unless($store) { $self->initIconview($icon); }
-
     $store = $icon->get_model();
 
     $self->_w('statusbar')->push($self->{statusctx}, "Loading duplicates for $value...");
@@ -113,17 +157,9 @@ sub on_treeview_row_activated {
     my $items = $self->{duplo}->duplicates_of($value);
     $store->clear();
 
-    my $unknown = Gtk2::Stock->lookup('gtk-missing-image');
     my ($pix,$size,$text);
     for my $f (@$items) {
-        $pix = undef;
-        if ($f->{Name} =~ /\.(jpg|gif|png|bmp|ico)$/i) {
-            $pix = Gtk2::Gdk::Pixbuf->new_from_file_at_scale(catfile($f->{Path}, $f->{Name}), 256, 256, 1);
-        }
-        $pix = $unknown unless $pix;
-        $size = format_bytes($f->{Size});
-        $text = qq( <b>$f->{Name}</b>\n$f->{Path}\n$size );
-        $store->insert_with_values(-1, 0 => $text, 1 => $pix, 2 => catfile($f->{Path}, $f->{Name}));
+        iv_add_file($icon, $f);
         #$store->insert_with_values(-1, IVCOL_LABEL => $text, IVCOL_IMAGE => $pix, IVCOL_PATH => catfile($f->{Path}, $f->{Name}));
     }
     $self->_w('statusbar')->pop($self->{statusctx});
@@ -135,12 +171,14 @@ sub on_iconview1_button_press_event {
     my ($icon, $event) = @_;
     return unless $event->button() == 3;
     my $model = $icon->get_model();
-    my $path = $icon->get_path_at_pos($event->x, $event->y);
-    $icon->unselect_all();
-    $icon->select_path($path);
-    my $iter = $model->get_iter($path);
-    my $value = $model->get($iter, IVCOL_PATH);
-    print Dumper($value);
+    unless ($icon->get_selected_items()) {
+        my $path = $icon->get_path_at_pos($event->x, $event->y);
+        $icon->unselect_all();
+        $icon->select_path($path);
+        my $iter = $model->get_iter($path);
+        my $value = $model->get($iter, IVCOL_PATH);
+        print Dumper($value);
+    }
     my $menu = $self->{menu};
     $menu->popup(undef, undef, undef, undef, $event->button, $event->time);
 }
@@ -162,6 +200,7 @@ sub on_menuDelete_activate {
     if ($self->confirm('rm ' . join("\n", @files))) {
         for my $f (@files) {
             if ($CANDELETE) {
+                $self->{duplo}->remove($f);
                 system('mv', '-b', $f, '/tmp/');
             }
         }
@@ -185,6 +224,29 @@ sub on_treeFolders_row_activated {
     print Dumper(\$value);
     return unless $value;
     $self->updateDupsTree($value);
+
+    $self->_w('statusbar')->push($self->{statusctx}, "Loading duplicates for $value...");
+    $self->busy();
+
+    my $icon = $self->_w('iconview1');
+    $self->initIconview($icon);
+    my $store = $icon->get_model();
+    $store->clear();
+
+    $icon->set_columns(2);
+
+    my $duplicates = $self->{duplo}->duplicates_in($value);
+    for my $fn (@$duplicates) {
+        my $fdups = $self->{duplo}->duplicates_of($fn->{Name});
+        for my $dup (@$fdups) {
+            my ($pix,$size,$text);
+            iv_add_file($icon, $dup);
+            $self->updateUI();
+        }
+    }
+
+    $self->_w('statusbar')->pop($self->{statusctx});
+    $self->idle();
 }
 
 #==-{ General utility methods }-================================================#
@@ -222,7 +284,7 @@ sub getSelectedPaths {
 
 sub initMenu {
     my $self = shift;
-    my ($menu) = $self->{_gui}->get_widget_prefix("iconMenu");
+    my ($menu) = $self->{gui}->get_widget_prefix("iconMenu");
     return $menu;
 }
 
@@ -230,6 +292,10 @@ sub initMenu {
 sub initIconview {
     my ($self, $icon) = @_
         or croak;
+    croak unless $icon;
+    if ($icon->get_model()) {
+        return;
+    }
     my $store = Gtk2::ListStore->new(qw( Glib::String Gtk2::Gdk::Pixbuf Glib::Scalar ));
     $icon->set_model($store);
     $icon->set_markup_column(IVCOL_LABEL);
@@ -368,7 +434,6 @@ sub tv_addcolumn {
     $tree->append_column($column);
     return ($column, $colID);
 }
-
 
 
 1;
