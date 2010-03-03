@@ -164,6 +164,12 @@ sub thumbnail {
     my ($self,$files) = @_
         or croak "thumbnail(\\\@files) is an instance method";
     my $dbh = $self->connect();
+    my $toset = $dbh->selectall_arrayref(q{ SELECT FullPath FROM File WHERE Thumbnail IS NULL });
+    my %files = map { $_ => 1 } @$files;
+    for my $f (@$toset) {
+        delete $files{$f->[0]};
+    }
+    $files = [keys %files];
     my $stm = $dbh->prepare(q{ UPDATE File SET Thumbnail = ? WHERE FullPath = ? });
     for my $f (@$files) {
         next unless -r $f;
