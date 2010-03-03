@@ -39,7 +39,7 @@ sub _init {
     my $src = shift
         or die "Failed to load glade file, pass to new()\n";
 
-    $self->loadPrefs();
+    #$self->loadPrefs();
 
     Gnome2::Program->init ('Duplo', '1.0');
 
@@ -102,6 +102,15 @@ sub on_appWindow_delete_event {
 sub on_btnNewScan_clicked {
     my $self = shift;
     $self->updateDupsTree();
+}
+
+sub on_btnThumbnail_clicked {
+    my $self = shift;
+    $self->busy();
+    my $dups = $self->{duplo}->allfiles();
+    my @files = map {$_->[0]} @$dups;
+    $self->{duplo}->thumbnail(\@files);
+    $self->idle();
 }
 
 sub on_btnOpenDB_clicked {

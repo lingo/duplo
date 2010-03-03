@@ -69,7 +69,20 @@
               </packing>
             </child>
             <child>
-              <widget class="GtkToolButton" id="Prefs">
+              <widget class="GtkToolButton" id="btnThumbnail">
+                <property name="visible">True</property>
+                <property name="label" translatable="yes">Create thumbnails</property>
+                <property name="use_underline">True</property>
+                <property name="stock_id">gtk-convert</property>
+                <signal name="clicked" handler="on_btnThumbnail_clicked"/>
+              </widget>
+              <packing>
+                <property name="expand">False</property>
+                <property name="homogeneous">True</property>
+              </packing>
+            </child>
+            <child>
+              <widget class="GtkToolButton" id="btnPrefs">
                 <property name="visible">True</property>
                 <property name="label" translatable="yes">Preferences</property>
                 <property name="stock_id">gtk-preferences</property>

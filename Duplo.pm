@@ -16,7 +16,13 @@ use Getopt::Declare;
 use Date::Format;
 use Number::Bytes::Human qw( format_bytes );
 use File::Spec::Functions;
+use File::Temp qw/ :POSIX /;
 
+
+our $default_filter = (
+    qr/Picasa\.ini/o,
+    qr/Thumbs\.db/o,
+);
 
 sub new {
     return bless({}, shift)->_init(@_);
@@ -28,6 +34,7 @@ sub _init {
     my ($dbfile) = @_
         or croak "Usage:: Duplo->new(\$dbfile)";
 
+    $self->{_filename_filter} = $default_filter;
     $self->{dbfile} = $dbfile;
     if ( !-f $dbfile ) {
         $self->initdb();
@@ -52,6 +59,9 @@ sub _wanted {
         return;
     };
     return if S_ISDIR($st->mode);
+    for my $rx (@{$self->{_filename_filter}}) {
+        return if $fn =~ /$rx/;
+    }
     my $dbh = $self->connect();
     my ($Path,$Name) = map($dbh->quote($_),($File::Find::dir, $fn));
     my $Size = $st->size;
@@ -133,6 +143,47 @@ sub duplicates {
     }
     $stm->finish();
     return \%dups;
+}
+
+sub get_thumb {
+    my ($self, $filepath) = @_
+        or croak 'get_thumb(\$filepath) is an instance method';
+    my $dbh = $self->connect();
+    $filepath = $dbh->quote($filepath);
+    return @{$dbh->selectrow_array(qq( SELECT Thumbnail FROM File WHERE FilePath = $filepath ))}[0];
+}
+
+sub allfiles {
+    my ($self) = @_
+        or croak 'allfiles() is an instance method';
+    my $dbh = $self->connect();
+    return $dbh->selectall_arrayref(q( SELECT DISTINCT FullPath FROM File ));
+}
+
+sub thumbnail {
+    my ($self,$files) = @_
+        or croak "thumbnail(\\\@files) is an instance method";
+    my $dbh = $self->connect();
+    my $stm = $dbh->prepare(q{ UPDATE File SET Thumbnail = ? WHERE FullPath = ? });
+    for my $f (@$files) {
+        next unless -r $f;
+        my ($type, $detail) = split '/', qx( file -b --mime-type "$f" );
+        next unless $type =~ /image/;
+        my $tmpfn = tmpnam() . '.jpg';
+        print "Thumbnailing $f to $tmpfn\n";
+        next unless system(qq{ convert "$f" -scale 128x "$tmpfn"}) == 0;
+        my $thumbdata;
+        {
+            $/ = 1;
+            open THUMB,'<',$tmpfn
+                or croak "$!";
+            $thumbdata = <THUMB>;
+            close THUMB;
+            unlink $tmpfn;
+        }
+        $stm->execute($thumbdata, $f);
+        $dbh->commit();
+    }
 }
 
 sub checksum {
@@ -254,6 +305,7 @@ sub remove {
     $dbh->do(qq{
         DELETE FROM File WHERE (Path||'/'||Name) = $path
         });
+    $dbh->commit();
 }
 
 sub initdb {
@@ -266,14 +318,17 @@ sub initdb {
             ID LONG PRIMARY KEY,
             Path VARCHAR(255) NOT NULL,
             Name VARCHAR(255) NOT NULL,
+            FullPath VARCHAR(255) NOT NULL,
             Size LONG NOT NULL,
             CreateTime TIMESTAMP NOT NULL,
             ModTime TIMESTAMP NOT NULL,
-            Checksum CHAR(32) DEFAULT NULL
+            Checksum CHAR(32) DEFAULT NULL,
+            Thumbnail BLOB DEFAULT NULL
         )
     |);
     $dbh->do(q| CREATE INDEX FilePathIdx ON File (Path) |);
     $dbh->do(q| CREATE INDEX FileNameIdx ON File (Name) |);
+    $dbh->do(q| CREATE INDEX FileFullPathIdx ON File (FullPath) |);
     $dbh->do(q| CREATE INDEX FileSizeIdx ON File (Size) |);
     $dbh->do(q| CREATE INDEX FileChecksufIdx ON File (Checksum) |);
     croak $DBI::errstr if $dbh->err();
