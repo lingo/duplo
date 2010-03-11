@@ -1,0 +1,32 @@
+# Install #
+
+## REQUIREMENTS ##
+
+The following Perl modules:
+
+ * Carp
+ * DBI
+ * Data::Dumper
+ * Date::Format
+ * Digest::SHA
+ * Duplo
+ * Fcntl
+ * File::Find
+ * File::Spec::Functions
+ * File::Spec::Functions
+ * File::Temp
+ * File::stat
+ * Getopt::Declare
+ * Glib
+ * Gnome2
+ * Gtk2::GladeXML
+ * Number::Bytes::Human
+
+
+# Usage #
+
+        user@host:~/duplo$ ./DuploUI.pm
+
+# Licence #
+
+[Gnu Public Licence v3](http://www.gnu.org/copyleft/gpl.html)
