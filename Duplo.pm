@@ -161,6 +161,31 @@ sub allfiles {
 }
 
 sub thumbnail {
+    my ($self, $file) = @_
+        or croak "thumbnail(\$file) is an instance method.";
+    my $dbh = $self->connect();
+    my $stm = $dbh->prepare(q{ UPDATE File SET Thumbnail = ? WHERE FullPath = ? });
+
+    my $tmpfn = tmpnam() . '.jpg';
+    print "Thumbnailing $file to $tmpfn\n";
+    next unless system(qq{ convert "$file" -scale 128x "$tmpfn"}) == 0;
+    my $thumbdata;
+    {
+        $/ = 1;
+        open THUMB,'<:raw',$tmpfn
+            or croak "$!";
+        $thumbdata = <THUMB>;
+        close THUMB;
+        unlink $tmpfn;
+    }
+    if ($thumbdata) {
+        $stm->execute($thumbdata, $file);
+        $dbh->commit();
+    }
+    return $thumbdata;
+}
+
+sub thumbnail_all {
     my ($self,$files) = @_
         or croak "thumbnail(\\\@files) is an instance method";
     my $dbh = $self->connect();
@@ -181,14 +206,16 @@ sub thumbnail {
         my $thumbdata;
         {
             $/ = 1;
-            open THUMB,'<',$tmpfn
+            open THUMB,'<:raw',$tmpfn
                 or croak "$!";
             $thumbdata = <THUMB>;
             close THUMB;
             unlink $tmpfn;
         }
-        $stm->execute($thumbdata, $f);
-        $dbh->commit();
+        if ($thumbdata) {
+            $stm->execute($thumbdata, $f);
+            $dbh->commit();
+        }
     }
 }
 

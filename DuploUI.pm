@@ -16,11 +16,25 @@ use Data::Dumper;
 #use YAML;
 use Duplo;
 use Number::Bytes::Human qw( format_bytes );
+use File::Temp qw/ :POSIX /;
 
 use constant TVCOL_FILENAME => 0;
 use constant IVCOL_LABEL => 0;
 use constant IVCOL_IMAGE => 1;
 use constant IVCOL_PATH => 2;
+
+our $abort = 0;
+
+sub sighandler {
+    print Dumper(\@_);
+    our $abort = 1;
+    $SIG{TERM} = 'DEFAULT';
+};
+
+
+for my $sig (qw[ HUP INT QUIT ABRT KILL TERM STOP USR1 ]) {
+    $SIG{$sig} = \&sighandler;
+}
 
 our $CANDELETE = 0;
 
@@ -109,7 +123,7 @@ sub on_btnThumbnail_clicked {
     $self->busy();
     my $dups = $self->{duplo}->allfiles();
     my @files = map {$_->[0]} @$dups;
-    $self->{duplo}->thumbnail(\@files);
+    $self->{duplo}->thumbnail_all(\@files);
     $self->idle();
 }
 
@@ -121,14 +135,28 @@ sub on_btnOpenDB_clicked {
 } 
 
 sub iv_add_file {
-    my ($icon, $file) = @_
+    my ($self, $icon, $file) = @_
         or croak;
     my $model = $icon->get_model();
     our $unknown_image ||= Gtk2::Stock->lookup('gtk-missing-image');
 
     my ($pix,$size,$text);
     $pix = undef;
-    if ($file->{Name} =~ /\.(jpg|gif|png|bmp|ico)$/i) {
+    unless($file->{Thumbnail}) {
+        $file->{Thumbnail} = $self->{duplo}->thumbnail($file->{FullPath});
+    }
+    if ($file->{Thumbnail}) {
+        print "Len = " . length($file->{Thumbnail}) . "\n";
+        my $tmpfn = tmpnam();
+        open IMG, '>:raw', $tmpfn
+            or croak "iv_add_file: $!";
+        print IMG $file->{Thumbnail};
+        close IMG;
+        print "$tmpfn\n";
+        $pix = Gtk2::Gdk::Pixbuf->new_from_file($tmpfn);
+        #unlink $tmpfn;
+    } elsif ($file->{Name} =~ /\.(jpg|gif|png|bmp|ico)$/i) {
+        my $tmpfn = tmpnam();
         my $fullpath = catfile($file->{Path}, $file->{Name});
         if ( -r $fullpath ) {
             $pix = Gtk2::Gdk::Pixbuf->new_from_file_at_scale($fullpath, 256, 256, 1);
@@ -167,8 +195,10 @@ sub on_treeview_row_activated {
     $store->clear();
 
     my ($pix,$size,$text);
+    our $abort;
     for my $f (@$items) {
-        iv_add_file($icon, $f);
+        $self->iv_add_file($icon, $f);
+        last if $abort;
         #$store->insert_with_values(-1, IVCOL_LABEL => $text, IVCOL_IMAGE => $pix, IVCOL_PATH => catfile($f->{Path}, $f->{Name}));
     }
     $self->_w('statusbar')->pop($self->{statusctx});
@@ -245,12 +275,14 @@ sub on_treeFolders_row_activated {
     $icon->set_columns(2);
 
     my $duplicates = $self->{duplo}->duplicates_in($value);
+    our $abort;
     for my $fn (@$duplicates) {
         my $fdups = $self->{duplo}->duplicates_of($fn->{Name});
         for my $dup (@$fdups) {
             my ($pix,$size,$text);
-            iv_add_file($icon, $dup);
+            $self->iv_add_file($icon, $dup);
             $self->updateUI();
+            last if $abort;
         }
     }
 
