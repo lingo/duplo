@@ -13,7 +13,6 @@ The following Perl modules:
  * Fcntl
  * File::Find
  * File::Spec::Functions
- * File::Spec::Functions
  * File::Temp
  * File::stat
  * Getopt::Declare
@@ -22,6 +21,8 @@ The following Perl modules:
  * Gtk2::GladeXML
  * Number::Bytes::Human
 
+Here's an aptitude line to install these 
+    # apt-get install libdbi-perl libgtk2-perl libgtk2-gladexml-perl libyaml-perl libgetopt-declare-perl libglib-perl libfile-temp-perl libgnome2-perl libfile-spec-perl libdigest-sha-perl libnumber-bytes-human-perl
 
 # Usage #
 
