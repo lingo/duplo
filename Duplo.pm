@@ -19,10 +19,10 @@ use File::Spec::Functions;
 use File::Temp qw/ :POSIX /;
 
 
-our $default_filter = (
+our $default_filter = [
     qr/Picasa\.ini/o,
     qr/Thumbs\.db/o,
-);
+];
 
 sub new {
     return bless({}, shift)->_init(@_);
@@ -31,11 +31,14 @@ sub new {
 sub _init {
     my $self = shift
         or croak "No self in _init";
-    my ($dbfile) = @_
+    my ($dbfile, $options) = @_
         or croak "Usage:: Duplo->new(\$dbfile)";
 
     $self->{_filename_filter} = $default_filter;
-    $self->{dbfile} = $dbfile;
+    $self->{dbfile}           = $dbfile;
+    $self->{options}          = $options || {};
+    print Dumper('options are',$self->{options});
+
     if ( !-f $dbfile ) {
         $self->initdb();
     }
@@ -43,32 +46,40 @@ sub _init {
 }
 
 sub scan {
-    my ($self, $dir) = @_
+    my ($self, $dir, $perfile_callback) = @_
         or croak "Usage: \$duplo->scan(\$path)";
     $self->{scandir} = $dir;
-    find(sub { return $self->_wanted($@); }, $dir);
+    find(sub { return $self->_wanted($_, $perfile_callback); }, $dir);
+    my $dbh = $self->connect();
+    $dbh->commit();
 }
 
 sub _wanted {
     my $self = shift
         or croak "No self in wanted";
     my $fn = shift
-        or croak "No fn in wanted";
+        or croak "No 'fn' arg provided in _wanted";
     my $st = stat $fn or do {
         carp "Failed to stat " . $File::Find::name . " : $!\n";
         return;
     };
     return if S_ISDIR($st->mode);
+
     for my $rx (@{$self->{_filename_filter}}) {
         return if $fn =~ /$rx/;
     }
     my $dbh = $self->connect();
+    my $FullPath = $dbh->quote(catfile($File::Find::dir, $fn));
+    my $perfile_callback = shift;
+    if ($perfile_callback) {
+        &$perfile_callback($fn);
+    }
     my ($Path,$Name) = map($dbh->quote($_),($File::Find::dir, $fn));
     my $Size = $st->size;
     my $CreateTime = $st->ctime;
     my $ModTime = $st->mtime;
     my $ID = unpack('L', sha1($File::Find::name));
-    $dbh->do(qq|INSERT INTO File (ID, Path, Name, Size, CreateTime, ModTime) VALUES ($ID, $Path, $Name, $Size, $CreateTime, $ModTime)|);
+    $dbh->do(qq|INSERT INTO File (ID, FullPath, Path, Name, Size, CreateTime, ModTime) VALUES ($ID, $FullPath, $Path, $Name, $Size, $CreateTime, $ModTime)|);
 }
 
 
@@ -76,15 +87,18 @@ sub duplicates_in {
     my ($self, $path) = @_
         or croak 'Usage: $duplo->duplicates_in($path_to_dir)';
     my $dbh = $self->connect();
-    $path = $dbh->quote($path);
+
+    my $require_name = ($self->{options}->{'skip-name'}) ? '' : ' F2.Name=F1.Name AND ';
+    $path            = $dbh->quote($path);
+
     my $stm = $dbh->prepare(qq{
         SELECT F2.*
         FROM File F1
-        JOIN File F2 ON 
-            F2.Name=F1.Name
-            AND F2.Size=F1.Size
+        JOIN File F2 ON
+            $require_name
+            F2.Size=F1.Size
             AND F2.ID != F1.ID
-            AND F2.Checksum = F1.Checksum
+            -- AND F2.Checksum = F1.Checksum
         WHERE F1.Path = $path
         ORDER BY F2.Path
         });
@@ -100,15 +114,19 @@ sub duplicates_in {
 sub duplicates_of {
     my ($self, $path) = @_
         or croak 'Usage: $duplo->duplicates_of($path_to_file)';
-    my $dbh = $self->connect();
-    $path = $dbh->quote($path);
+
+    my $dbh          = $self->connect();
+    $path            = $dbh->quote($path);
+
+    my $require_name = ($self->{options}->{'skip-name'}) ? '' : ' F2.Name=F1.Name AND ';
+
     my $stm = $dbh->prepare(qq{
         SELECT F2.*
         FROM File F1
-        JOIN File F2 ON 
-            F2.Name=F1.Name
-            AND F2.Size=F1.Size
-            AND F2.ID != F1.ID 
+        JOIN File F2 ON
+            $require_name
+            F2.Size=F1.Size
+            AND F2.ID != F1.ID
         WHERE F1.Name = $path
         ORDER BY F2.Path
         });
@@ -124,15 +142,18 @@ sub duplicates_of {
 sub duplicates {
     my $self = shift
         or croak "USAGE: \$duplo->duplicates()";
+
     my $dbh = $self->connect();
 
-    my $stm = $dbh->prepare(q|
+    my $require_name = ($self->{options}->{'skip-name'}) ? '' : ' F2.Name=F1.Name AND ';
+
+    my $stm = $dbh->prepare(qq|
         SELECT F1.*,F2.*
         FROM File F1
-        JOIN File F2 ON 
-            F2.Name=F1.Name
-            AND F2.Size=F1.Size
-            AND F2.ID != F1.ID 
+        JOIN File F2 ON
+            $require_name
+            F2.Size=F1.Size
+            AND F2.ID != F1.ID
         ORDER BY F1.Path,F2.Path
         |);
     $stm->execute();
@@ -218,14 +239,16 @@ sub plan {
         or do { carp("plan() called without args"); return; };
     my $dbh = $self->connect();
 
-    my $stm = $dbh->prepare(q{
+    my $require_name = ($self->{options}->{'skip-name'}) ? '' : ' AND F2.Name=F1.Name ';
+
+    my $stm = $dbh->prepare(qq{
         SELECT
         F1.Path||'/'||F1.Name AS File1,
         F2.Path||'/'||F2.Name AS File2
         FROM File F1
         JOIN File F2
             ON F2.Checksum = F1.Checksum
-            AND F2.Name=F1.Name
+            $require_name
             AND F2.ID > F1.ID
         GROUP BY F2.ID
         ORDER BY F1.Name,F1.Path,F2.Path;
@@ -267,6 +290,12 @@ sub get_dirs {
         push @paths, $row->[0];
     }
     $stm->finish();
+    unless (@paths) {
+        my $allPaths = $dbh->selectall_arrayref(q{SELECT DISTINCT Path FROM File});
+        for my $row (@$allPaths) {
+            push @paths, $row->[0];
+        }
+    }
     return \@paths;
 }
 
