@@ -180,7 +180,7 @@ sub on_treeview_row_activated {
     unless($store) { $self->initIconview($icon); }
     $store = $icon->get_model();
 
-    $self->_w('statusbar')->push($self->{statusctx}, "Loading duplicates for $value...");
+    $self->status("Loading duplicates for $value...");
     $self->busy();
 
     my $items = $self->{duplo}->duplicates_of($value);
@@ -191,7 +191,7 @@ sub on_treeview_row_activated {
         iv_add_file($icon, $f);
         #$store->insert_with_values(-1, IVCOL_LABEL => $text, IVCOL_IMAGE => $pix, IVCOL_PATH => catfile($f->{Path}, $f->{Name}));
     }
-    $self->_w('statusbar')->pop($self->{statusctx});
+    $self->status('Loaded duplicates for ' . $value);
     $self->idle();
 }
 
@@ -254,7 +254,7 @@ sub on_treeFolders_row_activated {
     return unless $value;
     $self->updateDupsTree($value);
 
-    $self->_w('statusbar')->push($self->{statusctx}, "Loading duplicates for $value...");
+    $self->status("Loading duplicates for $value...");
     $self->busy();
 
     my $icon = $self->_w('iconview1');
@@ -274,7 +274,7 @@ sub on_treeFolders_row_activated {
         }
     }
 
-    $self->_w('statusbar')->pop($self->{statusctx});
+    $self->status('Loaded all duplicates for ' . $value);
     $self->idle();
 }
 
