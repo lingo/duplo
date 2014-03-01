@@ -47,6 +47,8 @@ sub _init {
     $self->{gui} = Gtk2::GladeXML->new($src);
     $self->{gui}->signal_autoconnect_from_package($self);
     $self->{statusctx} = $self->_w('statusbar')->get_context_id("DuploUI");
+    $self->{_status_count} = 0;
+    $self->status('Initializing app...');
 
     my $tree = $self->_w('treeFolders');
     $tree->set_model(Gtk2::ListStore->new(qw[ Glib::String ]));
@@ -56,8 +58,10 @@ sub _init {
 
     $self->{cli_args} = \@_;
     $self->{duplo} = Duplo->new($db, $self->{options});
+    $self->status('Updating lists...');
     $self->updateFoldersTree();
     $self->updateDupsTree();
+    $self->status('Launched.');
     return $self;
 }
 
@@ -121,6 +125,20 @@ sub on_btnOpenDB_clicked {
     $self->{duplo} = Duplo->new($dbfile);
     $self->updateDupsTree();
 } 
+
+sub on_statusbar_text_pushed {
+    my $self = shift
+        or croak;
+
+    # Automatically fade out status messages after N seconds.
+    my $seconds = 5;
+
+    $self->{status_timer} = Glib::Timeout->add($seconds * 1000, sub {
+        while ($self->{_status_count} > 0) {            
+            $self->status();
+        }
+    });
+}
 
 sub iv_add_file {
     my ($icon, $file) = @_
@@ -362,6 +380,16 @@ sub updateDupsTree {
         for my $fn (sort keys %$duplicates) {
             $store->insert_with_values(-1, 0 => $fn);
         }
+    }
+sub status {
+    my ($self, $message) = @_
+        or croak;
+    if ($message) {
+        $self->_w('statusbar')->push($self->{statusctx}, $message);
+        ++$self->{_status_count};
+    } else {
+        $self->_w('statusbar')->pop($self->{statusctx});
+        --$self->{_status_count};
     }
 }
 
