@@ -24,13 +24,13 @@ use constant IVCOL_PATH => 2;
 
 our $CANDELETE = 0;
 
-sub new { 
+sub new {
     my ($class) = shift;
-    return bless({}, $class)->_init(shift);
+    return bless({}, $class)->_init(@_);
 }
 
 sub run {
-    my $self = shift->new(shift); Gtk2->main;
+    my $self = shift->new(@_); Gtk2->main;
 }
 
 sub _init {
@@ -39,6 +39,7 @@ sub _init {
     my $src = shift
         or die "Failed to load glade file, pass to new()\n";
 
+    my $db = shift || 'files.db'
     #$self->loadPrefs();
 
     Gnome2::Program->init ('Duplo', '1.0');
@@ -53,7 +54,8 @@ sub _init {
 
     $self->{menu} = $self->initMenu();
 
-    $self->{duplo} = Duplo->new('ext3photo.db');
+    $self->{cli_args} = \@_;
+    $self->{duplo} = Duplo->new($db, $self->{options});
     $self->updateFoldersTree();
     $self->updateDupsTree();
     return $self;
@@ -448,7 +450,8 @@ sub tv_addcolumn {
 1;
 
 package main;
-if ($ARGV[0] && $ARGV[0] =~ /DELETE/) {
-    $DuploUI::CANDELETE = 1;
-}
-DuploUI->run('Duplo.glade');
+# if ($ARGV[0] && $ARGV[0] =~ /DELETE/) {
+#     $DuploUI::CANDELETE = 1;
+# }
+use Data::Dumper;
+DuploUI->run('Duplo.glade', @ARGV);
