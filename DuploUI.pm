@@ -40,7 +40,7 @@ sub _init {
         or die "Failed to load glade file, pass to new()\n";
 
     my $db = shift || 'files.db'
-    #$self->loadPrefs();
+    $self->loadPrefs();
 
     Gnome2::Program->init ('Duplo', '1.0');
 
@@ -70,18 +70,19 @@ sub loadPrefs() {
     my ($self) = @_
         or croak "loadPrefs is an instance method";
     my $fn;
-    for my $f (qw{ ./duplo.rc ~/duplo.rc }) {
+    for my $f (qw{ ./duplo.rc ~/.duplo.rc }) {
         if ( -f $f ) {
             $fn = $f;
             last;
         }
     }
+    $self->{options} ||= {};
     open F, '<', $fn
         or croak "$!";
     while (<F>) {
         next if /^#/;
-        if (/(\w+)\s*[:=]\s*(.+)/) {
-            $self->{"_$1"} = $2;
+        if (/([\w-]+)\s*[:=]\s*(.+)/) {
+            $self->{options}->{$1} = $2;
         }
     }
     close F;
