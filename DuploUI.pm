@@ -106,8 +106,25 @@ sub on_appWindow_delete_event {
     Gtk2->main_quit;
 }
 
+sub on_btnAbout_clicked {
+    my $self = shift;
+
+    $self->_w('aboutdialog')->run();
+    $self->_w('aboutdialog')->hide();
+}
+
+sub on_btnPrefs_clicked {
+    my $self = shift;
+
+    $self->_w('prefsdialog')->run();
+    $self->_w('prefsdialog')->hide();
+}
+
 sub on_btnNewScan_clicked {
     my $self = shift;
+    my $dir = $self->choose_directory('Choose scan dir');
+    $self->{duplo}->scan($dir, sub { $self->status('Scanning ' . $_); });
+    $self->updateFoldersTree(); 
     $self->updateDupsTree();
 }
 
@@ -125,7 +142,7 @@ sub on_btnOpenDB_clicked {
     my $dbfile = $self->choose_file('Choose DB File');
     $self->{duplo} = Duplo->new($dbfile);
     $self->updateDupsTree();
-} 
+}
 
 sub on_statusbar_text_pushed {
     my $self = shift
@@ -184,7 +201,7 @@ sub on_treeview_row_activated {
     $self->status("Loading duplicates for $value...");
     $self->busy();
 
-    my $items = $self->{duplo}->duplicates_of($value);
+    my $items = $self->{duplo}->duplicates_of($value, $self->{options});
     $store->clear();
 
     my ($pix,$size,$text);
@@ -352,6 +369,12 @@ sub updateFoldersTree {
     my $store = $tree->get_model();
     $store->clear();
     my $dirs = $self->{duplo}->get_dirs();
+    unless (@$dirs) {
+        for my $d (@{$self->{cli_args}}) {
+            $self->{duplo}->scan($d);
+        }
+        $dirs = $self->{duplo}->get_dirs();
+    }
     for my $dir (@$dirs) {
         $store->insert_with_values(-1, 0 => $dir);
     }
@@ -377,11 +400,16 @@ sub updateDupsTree {
             $store->insert_with_values(-1, 0 => $fn->{Name});
         }
     } else {
-        $duplicates = $self->{duplo}->duplicates();
+        $duplicates = $self->{duplo}->duplicates($self->{options});
         for my $fn (sort keys %$duplicates) {
             $store->insert_with_values(-1, 0 => $fn);
         }
     }
+    unless ($duplicates) {
+        $store->insert_with_values(-1, 0 => "no duplicates found");
+    }
+}
+
 sub status {
     my ($self, $message) = @_
         or croak;
@@ -400,6 +428,23 @@ sub choose_file {
     $type ||= 'open';
     $prompt ||= 'Choose a file';
     my $fc = Gtk2::FileChooserDialog->new($prompt, $self->mainWindow(), $type, 'gtk-cancel' => 'cancel', 'gtk-ok' => 'ok');
+    my $resp = $fc->run();
+    my $choice = undef;
+    if ($resp eq 'ok') {
+        $choice = $fc->get_filename();
+    }
+    $fc->destroy();
+    return $choice;
+}
+
+
+sub choose_directory {
+    my ($self, $prompt, $type) = @_
+        or croak;
+    $type ||= 'open';
+    $prompt ||= 'Choose a file';
+    my $fc = Gtk2::FileChooserDialog->new($prompt, $self->mainWindow(), $type, 'gtk-cancel' => 'cancel', 'gtk-ok' => 'ok');
+    $fc->set_action('GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER');
     my $resp = $fc->run();
     my $choice = undef;
     if ($resp eq 'ok') {
